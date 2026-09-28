@@ -1,0 +1,4 @@
+#忽略开发计划方案和过程控制的Development_Control目录
+Development_Control/
+#忽略项目运行过程中必要的本地数据的Local目录
+Local/
