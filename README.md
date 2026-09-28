@@ -32,7 +32,7 @@
 - 输入 `/role set 程序员`，AI 立刻切换成程序员角色和你对话；
 - 输入 `/agent deploy`，消息被转发给一个真正的智能体（Agent）来执行复杂任务。
 
-底层基于腾讯官方开放的 **iLink Bot API**（`ilinkai.weixin.qq.com`），通过 **微信 ClawBot 插件功能** 接入。与传统的逆向协议或 Hook 方案不同，这是腾讯官方产品，有《微信ClawBot功能使用条款》法律文件背书，合规且不怕封号[reference:8]。
+底层基于腾讯官方开放的 **iLink Bot API**（`ilinkai.weixin.qq.com`），通过 **微信 ClawBot 插件功能** 接入。与传统的逆向协议或 Hook 方案不同，这是腾讯官方产品，有《微信ClawBot功能使用条款》法律文件背书，合规且不怕封号。
 
 适用场景：
 
@@ -94,45 +94,128 @@
 
 ## 技术栈
 
-- 语言：TypeScript（Node.js 22+）
-- 通信：iLink Bot API（HTTP 长轮询）
-- LLM 后端：OpenAI / Anthropic / DeepSeek（可扩展）
-- 智能体协议：ACP (Agent Client Protocol)
-- 配置管理：dotenv + JSON 配置文件
-- 测试：Vitest
-- 构建：tsup / esbuild
+- 编程语⾔：Python 3.12+
+- 异步框架: asyncio
+- HTTP 客户端: httpx
+- Web 框架: FastAPI
+- 数据校验: Pydantic v2
+- ORM: SQLAlchemy 2.x
+- 数据库: SQLite → PostgreSQL
+- 定时任务: APScheduler APScheduler
+- LLM OpenAI SDK / Anthropic SDK / DeepSeek API
+- Agent ACP / OpenClaw Adapter
+- MCP Python SDK
 
 ## 目录结构
 
 ```text
-.
-├── src/
-│   ├── core/                # 核心框架
-│   │   ├── client.ts        # iLink API 封装
-│   │   ├── router.ts        # 消息路由与指令分发
-│   │   ├── dispatcher.ts    # 调度中心
-│   │   └── session.ts       # 会话状态管理
-│   ├── modules/
-│   │   ├── script/          # 脚本执行模块
-│   │   │   ├── registry.ts  # 指令注册表
-│   │   │   └── executor.ts  # 脚本执行器
-│   │   ├── ai/              # AI 角色对话模块
-│   │   │   ├── persona.ts   # 角色管理
-│   │   │   ├── memory.ts    # 对话记忆
-│   │   │   └── llm.ts       # LLM 接口封装
-│   │   └── agent/           # 智能体接入模块
-│   │       ├── bridge.ts    # Agent 桥接接口
-│   │       └── adapters/    # 各智能体适配器
-│   ├── config/              # 配置管理
-│   └── index.ts             # 入口
-├── scripts/                 # 用户自定义脚本
-├── personas/                # 角色配置文件
-│   └── default.json         # 默认角色
-├── docs/                    # 文档
-├── tests/                   # 测试
-├── .env.example             # 环境变量示例
-├── package.json
-└── README.md
+wechat-clawhub/                         #项目根目录：WeChat-ClawHub 主项目
+│
+├── app/                                #应用核心代码目录
+│   ├── main.py                         #应用启动入口：初始化系统并启动主程序
+│   │
+│   ├── core/                           #核心基础设施与公共能力
+│   │   ├── config.py                   #配置管理：加载环境变量和 YAML 配置
+│   │   ├── logger.py                   #日志系统：统一日志格式、级别和输出
+│   │   ├── exceptions.py               #全局异常定义：统一管理业务和系统异常
+│   │   ├── lifecycle.py                #应用生命周期：启动、运行和关闭流程管理
+│   │   └── container.py                #依赖容器：统一创建和管理系统组件
+│   │
+│   ├── transport/                      #通信传输层：负责外部平台消息接入
+│   │   └── wechat/                     #微信 ClawBot / iLink 通信实现
+│   │       ├── client.py               #微信客户端：封装 iLink API 基础调用
+│   │       ├── auth.py                 #微信认证：登录、Token 保存和认证状态管理
+│   │       ├── poller.py               #消息轮询：通过长轮询持续接收微信消息
+│   │       ├── sender.py               #消息发送：向微信发送文本和状态消息
+│   │       └── models.py               #微信协议模型：定义微信 API 请求和响应结构
+│   │
+│   ├── messaging/                      #消息处理层：统一消息模型和消息路由
+│   │   ├── models.py                   #消息模型：定义系统内部统一 Message 结构
+│   │   ├── parser.py                   #消息解析：解析微信原始消息内容
+│   │   ├── normalizer.py               #消息标准化：将不同类型消息转换为统一格式
+│   │   └── router.py                   #消息路由：判断消息应该交给 Script、AI 还是 Agent
+│   │
+│   ├── session/                        #会话管理层：维护用户和对话状态
+│   │   ├── manager.py                  #会话管理器：创建、查询和更新用户 Session
+│   │   ├── models.py                   #会话模型：定义 Session 数据结构
+│   │   └── context.py                  #上下文管理：保存当前对话和运行上下文
+│   │
+│   ├── dispatcher/                     #任务调度层：将路由结果交给具体处理模块
+│   │   ├── dispatcher.py               #调度中心：根据路由结果调用对应 Handler
+│   │   └── handlers.py                 #通用处理器：定义消息处理 Handler 接口
+│   │
+│   ├── modules/                        #业务功能模块集合
+│   │
+│   │   ├── script/                     #脚本执行模块：提供自动化脚本能力
+│   │   │   ├── registry.py             #脚本注册表：注册和管理可用脚本命令
+│   │   │   ├── executor.py             #脚本执行器：负责启动并执行 Python 脚本
+│   │   │   ├── sandbox.py              #脚本沙箱：隔离脚本运行环境并限制资源
+│   │   │   ├── permission.py            #脚本权限：控制文件、网络和进程等权限
+│   │   │   └── models.py               #脚本模型：定义脚本及执行参数的数据结构
+│   │   │
+│   │   ├── ai/                         #AI 对话模块：负责 LLM 对话和角色系统
+│   │   │   ├── service.py              #AI 服务：负责组织完整的 AI 对话流程
+│   │   │   ├── persona.py              #角色管理：加载、切换和管理 AI Persona
+│   │   │   ├── memory.py               #记忆系统：管理短期上下文和长期记忆
+│   │   │   ├── context.py              #AI 上下文：组装 Prompt、历史消息和记忆
+│   │   │   └── providers/              #LLM Provider：不同模型服务的适配层
+│   │   │       ├── base.py              #Provider 基类：定义统一的 LLM 接口
+│   │       │   ├── openai.py            #OpenAI Provider：接入 OpenAI 模型服务
+│   │       │   ├── anthropic.py         #Anthropic Provider：接入 Anthropic 模型服务
+│   │       │   └── deepseek.py          #DeepSeek Provider：接入 DeepSeek 模型服务
+│   │   │
+│   │   └── agent/                      #Agent 智能体模块：负责复杂任务执行和外部 Agent 接入
+│   │       ├── service.py              #Agent 服务：处理 Agent 请求和任务创建
+│   │       ├── runtime.py              #Agent 运行时：管理 Agent 的生命周期和执行过程
+│   │       ├── task.py                 #Agent 任务：定义 Agent Task 创建和执行逻辑
+│   │       ├── bridge.py               #Agent 桥接接口：定义统一 Agent 接入协议
+│   │       ├── permission.py           #Agent 权限：控制 Agent 可执行的操作范围
+│   │       └── adapters/               #Agent 适配器：接入不同 Agent 框架或协议
+│   │           ├── acp.py               #ACP 适配器：接入兼容 ACP 协议的 Agent
+│   │           └── openclaw.py          #OpenClaw 适配器：接入 OpenClaw Agent
+│   │
+│   ├── task/                           #异步任务基础设施：统一管理后台任务
+│   │   ├── manager.py                  #任务管理器：创建、查询、更新和取消任务
+│   │   ├── worker.py                   #任务 Worker：后台执行异步任务
+│   │   ├── queue.py                    #任务队列：管理待执行任务和任务调度
+│   │   └── models.py                   #任务模型：定义 Task 状态和数据结构
+│   │
+│   ├── storage/                        #数据持久化层：负责数据库和数据访问
+│   │   ├── database.py                 #数据库连接：初始化数据库和 ORM 会话
+│   │   ├── models.py                   #数据库模型：定义用户、消息、任务等数据表
+│   │   └── repositories/               #数据仓库：封装具体的数据读写操作
+│   │
+│   ├── tools/                          #工具层：统一管理 AI / Agent 可调用工具
+│   │   ├── registry.py                 #工具注册表：注册和管理可调用 Tool
+│   │   ├── executor.py                 #工具执行器：统一执行和管理 Tool 调用
+│   │   └── mcp/                        #MCP 工具：对接 Model Context Protocol
+│   │
+│   └── api/                            #HTTP API 层：为管理后台和外部系统提供接口
+│       ├── routes/                     #API 路由：定义各类 HTTP 接口
+│       └── dependencies.py             #API 依赖：统一管理认证、数据库等依赖注入
+│
+├── scripts/                            #用户自定义脚本目录：存放可执行自动化脚本
+│   ├── weather.py                      #天气查询示例脚本
+│   ├── github.py                       #GitHub 操作示例脚本
+│   └── ...                             #其他自定义 Python 脚本
+│
+├── personas/                           #AI 角色配置目录：存放不同 Persona 配置
+│   ├── programmer.json                 #程序员角色配置
+│   └── default.json                    #默认 AI 角色配置
+│
+├── tests/                              #自动化测试目录
+│   ├── unit/                           #单元测试：测试独立函数、类和模块
+│   ├── integration/                    #集成测试：测试模块之间的协作
+│   └── e2e/                            #端到端测试：测试完整微信业务流程
+│
+├── config/                             #项目配置文件目录
+│   └── config.yaml                     #系统主配置：LLM、Agent、Script 等运行参数
+│
+├── Dockerfile                          #Docker 镜像构建文件：定义应用运行环境
+├── docker-compose.yml                  #Docker 编排文件：统一启动应用、数据库和 Redis 等服务
+├── pyproject.toml                      #Python 项目配置：依赖、工具链和构建配置
+├── .env.example                        #环境变量模板：提供 API Key 等配置示例
+└── README.md                           #项目说明文档：介绍项目、架构、安装和开发方式
 ```
 
 ## 环境要求
