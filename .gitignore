@@ -2,3 +2,9 @@
 Development_Control/
 #忽略项目运行过程中必要的本地数据的Local目录
 Local/
+#忽略所有目录下以 .env. 开头的文件
+.env.*
+#忽略所有目录下名为 .env 的文件
+.env
+#.env.example 不会被忽略
+!.env.example
