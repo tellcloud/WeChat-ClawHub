@@ -1,12 +1,41 @@
+[build-system]
+# 构建后端：setuptools（>=77 支持 PEP 639 的 SPDX license 表达式写法）
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "wechat-clawhub"
 version = "0.1.0"
+description = "基于微信 ClawBot（iLink Bot API）的多功能智能助手中枢：脚本执行、AI 角色对话、智能体接入"
+readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "tellcloud" }]
+keywords = ["wechat", "clawbot", "ilink", "ai", "chatbot", "assistant"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications :: Chat",
+]
 dependencies = [
     "httpx>=0.27",      # 异步 HTTP 客户端（iLink API / CDN）
     "pydantic>=2.0",    # 协议模型与配置校验
     "cryptography>=42.0",  # 媒体 AES-128-ECB 加解密
 ]
 
+[project.optional-dependencies]
+# 开发依赖：单元测试（tests/unit）。安装：pip install -e ".[dev]"
+dev = [
+    "pytest>=8.0",
+]
+
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src", "."]
+include = ["messaging*", "transport*", "modules*"]
+
+[tool.pytest.ini_options]
+# 让项目根裸跑 pytest 等价于 python -m pytest tests/
+testpaths = ["tests"]
