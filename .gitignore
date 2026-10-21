@@ -8,3 +8,7 @@ Local/
 .env
 #.env.example 不会被忽略
 !.env.example
+#忽略 Python 编译缓存与打包元数据
+__pycache__/
+*.pyc
+*.egg-info/
