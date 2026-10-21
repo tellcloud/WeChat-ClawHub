@@ -24,6 +24,7 @@ dependencies = [
     "httpx>=0.27",      # 异步 HTTP 客户端（iLink API / CDN）
     "pydantic>=2.0",    # 协议模型与配置校验
     "cryptography>=42.0",  # 媒体 AES-128-ECB 加解密
+    "python-dotenv>=1.0",  # 入口自动加载 .env 环境变量（load_dotenv）
 ]
 
 [project.optional-dependencies]
