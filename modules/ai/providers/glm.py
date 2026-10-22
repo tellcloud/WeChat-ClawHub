@@ -1,7 +1,8 @@
 """GLM Provider：接入智谱 AI（GLM 系列模型）。
 
 对应 README 目录结构中的 ``modules/ai/providers/glm.py``
-（项目实际选用 GLM 作为首个后端，OpenAI / Anthropic / DeepSeek 后续按需补充）。
+（项目实际选用 GLM 作为首个后端，DeepSeek / Qwen 为后续补充的后端，
+OpenAI / Anthropic 再按需补充）。
 
 智谱 GLM v4 API（OpenAI 兼容风格）：
 

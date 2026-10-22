@@ -6,7 +6,7 @@
 - :mod:`~modules.ai.persona`    — 角色管理：加载、切换和管理 AI Persona；
 - :mod:`~modules.ai.memory`     — 记忆系统：短期上下文 + 长期记忆；
 - :mod:`~modules.ai.context`    — AI 上下文：组装 Prompt、历史消息和记忆；
-- :mod:`~modules.ai.providers`  — LLM Provider 适配层（GLM）。
+- :mod:`~modules.ai.providers`  — LLM Provider 适配层（GLM / DeepSeek / Qwen）。
 
 典型数据流::
 
@@ -47,6 +47,8 @@ from .providers import (
     ChatRequest,
     ChatResponse,
     ChatRole,
+    DeepSeekConfig,
+    DeepSeekProvider,
     GLMConfig,
     GLMProvider,
     LLMProvider,
@@ -56,6 +58,8 @@ from .providers import (
     ProviderError,
     ProviderRateLimitError,
     ProviderTimeoutError,
+    QwenConfig,
+    QwenProvider,
     Usage,
     available_providers,
     create_provider,
@@ -92,6 +96,10 @@ __all__ = [
     "LLMProvider",
     "GLMProvider",
     "GLMConfig",
+    "DeepSeekProvider",
+    "DeepSeekConfig",
+    "QwenProvider",
+    "QwenConfig",
     "ProviderConfig",
     "ProviderError",
     "ProviderAuthError",

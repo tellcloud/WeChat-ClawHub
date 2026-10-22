@@ -21,7 +21,8 @@
     ④ 上下文组装 ──► ContextBuilder（system + 历史 + 当前消息）
         │
         ▼
-    ⑤ LLM 调用 ──► LLMProvider.chat（GLM，带 typing 状态与重试）
+    ⑤ LLM 调用 ──► LLMProvider.chat（GLM / DeepSeek，/llm set 切换，
+       带 typing 状态与重试）
         │
         ▼
     ⑥ 记录与回复 ──► 写回短期记忆，经 transport MessageSender 发出
@@ -58,8 +59,17 @@ from .memory import (
     NullSummarizer,
 )
 from .persona import DEFAULT_PERSONA_NAME, Persona, PersonaManager, PersonaNotFoundError
-from .providers.base import ChatMessage, ChatRole, LLMProvider, ProviderError
+from .providers import available_providers, create_provider, provider_config_class
+from .providers.base import (
+    ChatMessage,
+    ChatRole,
+    LLMProvider,
+    ProviderConfig,
+    ProviderError,
+)
+from .providers.deepseek import DeepSeekConfig
 from .providers.glm import GLMConfig
+from .providers.qwen import QwenConfig
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +150,14 @@ class AIServiceConfig(BaseModel):
     glm: GLMConfig = Field(
         default_factory=GLMConfig.from_env, description="GLM Provider 配置"
     )
+    deepseek: DeepSeekConfig = Field(
+        default_factory=DeepSeekConfig.from_env,
+        description="DeepSeek Provider 配置（/llm set deepseek 切换时使用）",
+    )
+    qwen: QwenConfig = Field(
+        default_factory=QwenConfig.from_env,
+        description="Qwen Provider 配置（/llm set qwen 切换时使用）",
+    )
     context: ContextConfig = Field(
         default_factory=ContextConfig, description="上下文组装配置"
     )
@@ -151,7 +169,8 @@ class AIServiceConfig(BaseModel):
     )
     unconfigured_reply: str = Field(
         default="AI 对话尚未配置：请设置环境变量 GLM_API_KEY"
-        "（智谱开放平台）后重启生效。",
+        "（智谱开放平台）或 DEEPSEEK_API_KEY 后重启生效"
+        "（可用 /llm list 查看可用 LLM）。",
         description="未配置 API Key 时的回复",
     )
     non_text_reply: str = Field(
@@ -161,8 +180,13 @@ class AIServiceConfig(BaseModel):
 
     @classmethod
     def from_env(cls, **overrides: Any) -> AIServiceConfig:
-        """从环境变量构造配置（``GLM_*`` 经 :meth:`GLMConfig.from_env` 读取）。"""
-        values: dict[str, Any] = {"glm": GLMConfig.from_env()}
+        """从环境变量构造配置（``GLM_*`` / ``DEEPSEEK_*`` / ``QWEN_*`` 经
+        对应 ``*Config.from_env`` 读取）。"""
+        values: dict[str, Any] = {
+            "glm": GLMConfig.from_env(),
+            "deepseek": DeepSeekConfig.from_env(),
+            "qwen": QwenConfig.from_env(),
+        }
         values.update(overrides)
         return cls(**values)
 
@@ -222,6 +246,19 @@ class AIService:
         #: session_key → 当前角色名（内存态，重启回到默认角色）
         self._active_personas: dict[str, str] = {}
 
+        # -- LLM 切换（/llm set <名称>，服务级：所有会话生效） --
+        #: 当前 LLM Provider 名称（未配置 Provider 时回退默认目标 glm）
+        self._llm_name: str = provider.name if provider is not None else "glm"
+        #: 各 LLM 的配置（glm / deepseek / qwen 来自服务配置，可被测试注入；
+        #: 其余 Provider 切换时按环境变量构造并缓存）
+        self._llm_configs: dict[str, ProviderConfig] = {
+            "glm": self.config.glm,
+            "deepseek": self.config.deepseek,
+            "qwen": self.config.qwen,
+        }
+        #: 摘要器是否为服务自建（切换 LLM 时跟随重建；外部注入的不动）
+        self._owns_summarizer: bool = summarizer is None
+
     # -- 角色管理 ------------------------------------------------------------
 
     def current_persona_name(self, session_key: str) -> str:
@@ -249,6 +286,63 @@ class AIService:
     def list_personas(self, session_key: str = "") -> list[Persona]:
         """全部角色（按名称排序）。"""
         return self.personas.list()
+
+    # -- LLM 管理（/llm list|set <名称>） --------------------------------------
+
+    def current_llm(self) -> str:
+        """当前 LLM Provider 名称（服务级，所有会话生效）。"""
+        return self._llm_name
+
+    def list_llms(self) -> list[tuple[str, ProviderConfig, bool]]:
+        """可用 LLM 列表：``(名称, 配置, 是否当前)``，按名称排序。"""
+        return [
+            (name, self._llm_config_for(name), name == self._llm_name)
+            for name in available_providers()
+        ]
+
+    async def set_llm(self, name: str) -> str:
+        """切换 LLM Provider（服务级，所有会话生效），返回回复文本。
+
+        glm / deepseek 使用服务配置（``config.glm`` / ``config.deepseek``），
+        其余 Provider 按环境变量构造默认配置；目标未配置 API Key 时
+        拒绝切换并给出提示。切换成功后旧 Provider 被关闭，摘要器
+        跟随新 LLM 重建（外部注入的摘要器不动）。
+        """
+        key = name.strip().lower()
+        available = available_providers()
+        if not key:
+            return "用法：/llm set <名称>（可用 /llm list 查看可用 LLM）"
+        if key not in available:
+            return f"LLM「{name}」不存在。可用：{'、'.join(available)}"
+        if key == self._llm_name and self.provider is not None:
+            return f"当前已在使用 LLM「{key}」（模型 {self._llm_config().model}）。"
+
+        config = self._llm_config_for(key)
+        if not config.api_key:
+            return f"LLM「{key}」未配置 API Key（{key.upper()}_API_KEY），无法切换。"
+
+        provider = create_provider(key, config)
+        old_provider = self.provider
+        self.provider = provider
+        self._llm_name = key
+        self._llm_configs[key] = config
+        if self._owns_summarizer:
+            self.summarizer = LLMSummarizer(provider)
+        if old_provider is not None:
+            await old_provider.close()
+        logger.info("LLM 切换: → %s（模型 %s）", key, config.model)
+        return f"已切换到 LLM「{key}」（模型 {config.model}）。"
+
+    def _llm_config(self) -> ProviderConfig:
+        """当前 LLM 的配置（默认模型 / 温度 / max_tokens 兜底来源）。"""
+        return self._llm_configs.get(self._llm_name, self.config.glm)
+
+    def _llm_config_for(self, name: str) -> ProviderConfig:
+        """取指定 LLM 的配置（内置项来自服务配置，其余按环境变量构造）。"""
+        cached = self._llm_configs.get(name)
+        if cached is not None:
+            return cached
+        return provider_config_class(name).from_env()
 
     # -- 主流程 --------------------------------------------------------------
 
@@ -292,14 +386,16 @@ class AIService:
         )
         request = assembled.to_request(
             persona=persona,
-            default_model=self.config.glm.model,
-            default_temperature=self.config.glm.temperature,
-            default_max_tokens=self.config.glm.max_tokens,
+            default_model=self._llm_config().model,
+            default_temperature=self._llm_config().temperature,
+            default_max_tokens=self._llm_config().max_tokens,
         )
 
         # ⑤ LLM 调用（未配置时引导配置；失败时友好降级）
         if self.provider is None:
-            logger.warning("AI 对话未配置 Provider（缺少 GLM_API_KEY）")
+            logger.warning(
+                "AI 对话未配置 Provider（当前 LLM：%s，缺少 API Key）", self._llm_name
+            )
             return await self._reply(sink, message, self.config.unconfigured_reply)
 
         try:
@@ -333,16 +429,20 @@ class AIService:
         message: Message,
         sink: Optional[ReplySink] = None,
     ) -> str:
-        """处理 AI 模块指令（当前为 ``/role``），返回回复文本。
+        """处理 AI 模块指令（``/role`` / ``/llm``），返回回复文本。
 
         指令由 messaging 路由层识别为 SCRIPT 目标后交回本模块执行
-        （README「AI 角色对话」中的 ``/role list|set <名称>``）。
+        （README「AI 角色对话」中的 ``/role list|set <名称>``，
+        以及 ``/llm list|set <名称>`` 的 LLM 列出 / 切换）。
 
-        :param command: 指令名（``role``）；
+        :param command: 指令名（``role`` / ``llm``）；
         :param args: 指令参数；
         :param message: 原始消息（取 session / sender / context_token）；
         :param sink: 回复出口。
         """
+        if command == "llm":
+            return await self._handle_llm_command(args, message, sink)
+
         session_key = message.session_key
         sub = args[0].lower() if args else "current"
         rest = " ".join(args[1:]).strip() if len(args) > 1 else ""
@@ -380,12 +480,37 @@ class AIService:
 
         return await self._reply(sink, message, reply)
 
+    async def _handle_llm_command(
+        self,
+        args: list[str],
+        message: Message,
+        sink: Optional[ReplySink],
+    ) -> str:
+        """``/llm list|set <名称>``：列出 / 切换 LLM（服务级生效）。"""
+        sub = args[0].lower() if args else "current"
+        rest = " ".join(args[1:]).strip() if len(args) > 1 else ""
+
+        if sub == "list":
+            reply = self._format_llm_list()
+        elif sub == "set":
+            reply = await self.set_llm(rest)
+        elif sub in ("current", ""):
+            reply = self._format_llm_current()
+        else:
+            reply = (
+                "用法：/llm list（列出可用 LLM）| /llm set <名称>（切换）| "
+                "/llm current（当前 LLM）"
+            )
+
+        return await self._reply(sink, message, reply)
+
     # -- 统计 / 生命周期 -------------------------------------------------------
 
     def stats(self) -> dict[str, object]:
         """运行状态（调试 / 测试用）。"""
         return {
             "provider": self.provider.name if self.provider else None,
+            "llm": self._llm_name,
             "active_personas": dict(self._active_personas),
             "personas": [p.name for p in self.personas.list()],
             "conversation": self.conversation.stats(),
@@ -476,6 +601,30 @@ class AIService:
         return text
 
     # -- 指令格式化 ----------------------------------------------------------
+
+    def _format_llm_list(self) -> str:
+        """``/llm list`` 的可用 LLM 清单。"""
+        lines = ["可用 LLM："]
+        for name, config, is_current in self.list_llms():
+            marks = []
+            if is_current:
+                marks.append("← 当前")
+            if not config.api_key:
+                marks.append(f"未配置 {name.upper()}_API_KEY")
+            suffix = f"（{'，'.join(marks)}）" if marks else ""
+            lines.append(f"· {name} — {config.model}{suffix}")
+        lines.append("切换：/llm set <名称>")
+        return "\n".join(lines)
+
+    def _format_llm_current(self) -> str:
+        """``/llm current`` 的当前 LLM。"""
+        config = self._llm_config()
+        if self.provider is None:
+            return (
+                f"当前 LLM：{self._llm_name}（模型 {config.model}），"
+                "但未配置 API Key，AI 对话暂不可用。"
+            )
+        return f"当前 LLM：{self._llm_name}（模型 {config.model}）"
 
     def _format_persona_list(self, session_key: str) -> str:
         """``/role list`` 的角色清单。"""

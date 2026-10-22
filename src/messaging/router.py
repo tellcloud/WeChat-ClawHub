@@ -191,6 +191,11 @@ def default_registry() -> CommandRegistry:
                 help_text="/role list|set <名称> — 列出 / 切换 AI 角色",
             ),
             CommandSpec(
+                name="llm",
+                keywords=("模型", "llm"),
+                help_text="/llm list|set <名称> — 列出 / 切换 LLM 模型",
+            ),
+            CommandSpec(
                 name="agent",
                 keywords=("智能体",),
                 help_text="/agent list|use <名称> — 列出 / 切换智能体",
